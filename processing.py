@@ -10,6 +10,9 @@ import pickle
 
 DATA_DIR = 'data'
 RES_DIR = 'tmp'
+TX_TIME_FILE = 'tx_time.json'  # file which caches the time of each block
+TX_TIME_CACHE = None
+HOURS_24 = 43200 * 2  # seconds in 24 hrs
 
 
 def get_blocks():
@@ -38,10 +41,44 @@ def iter_blocks():
             yield (size, json.load(fp), len(blocks))
 
 
+def get_txs(block_path):
+    with open(block_path) as fp:
+        j = json.load(fp)
+    return j['tx']
+
+
 def iter_transactions():
     for i,(size,dic,len_) in enumerate(iter_blocks()):
         for tx in dic['tx']:
             yield tx, {'current': i+1, 'total': len_}
+
+
+def get_tx_time(block_height):
+    global TX_TIME_CACHE
+    file_loc = path.join(RES_DIR, TX_TIME_FILE)
+    if not TX_TIME_CACHE:
+        with open(file_loc) as fp:
+            TX_TIME_CACHE = json.load(fp)
+
+    if str(block_height) not in TX_TIME_CACHE:
+        blocks,_,_ = get_blocks()
+        added_blocks = set(TX_TIME_CACHE.keys())
+        to_add_blocks = [(block,path_) for block,path_ in blocks
+                         if str(block) not in added_blocks]
+        print('Looking up times for {} blocks'.format(len(to_add_blocks)))
+        for i,(block,path_) in enumerate(to_add_blocks):
+            if (i+1) % 100 == 0:
+                print('{}/{} done ({}%)'.format(i+1, len(to_add_blocks),
+                                int((i+1) / len(to_add_blocks) * 100)))
+            with open(path_) as fp:
+                j = json.load(fp)
+                TX_TIME_CACHE[block] = j['time']
+
+        with open(file_loc, 'w') as fp:
+            json.dump(TX_TIME_CACHE, fp)
+        print('done')
+
+    return TX_TIME_CACHE[str(block_height)]
 
 
 class MakeNetwork(luigi.Task):
@@ -96,13 +133,73 @@ class MakeNetwork(luigi.Task):
             pickle.dump(g, fp)
 
 
+class FeaturizeTransactionInterval(luigi.Task):
+    start_time = luigi.IntParameter()
+    end_time = luigi.IntParameter()
+
+    def output(self):
+        return luigi.LocalTarget(path.join(RES_DIR,
+            'featurized_tx_interval_from_{}_to_{}.json'\
+                    .format(self.start_time, self.end_time)))
+
+    def run(self):
+        before = False
+        after = False
+        txs = []
+        for block,path_ in get_blocks()[0]:
+            time = get_tx_time(block)
+            if time <  self.start_time: before = True
+            elif time >=  self.end_time: after = True
+            else:
+                txs += get_txs(path_)
+
+        num_tx = len(txs)
+        num_in = 0
+        num_out = 0
+        total_val = 0
+        old_vals = {x:0 for x in
+                    {'0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9'}}
+
+        for i,tx in enumerate(txs):
+            num_in += len(tx.get('inputs', []))
+            num_out += len(tx.get('out', []))
+            for input_ in tx.get('inputs', []):
+                val = input_.get('value', 0)
+                total_val += val
+                try:
+                    age = int(input_['tx_index']) / int(tx['tx_index'])
+                    for k in old_vals.keys():
+                        if age <= float(k):
+                            old_vals[k] += val
+                except KeyError:
+                    pass
+
+        features = {
+            'start_time': self.start_time,
+            'end_time': self.end_time,
+            'amount_traded': total_val,
+            'total_transactions': num_tx,
+            'total_inputs': num_in,
+            'total_outputs': num_out,
+            'old_amounts_traded': old_vals
+        }
+        with self.output().open('w') as fp:
+            json.dump(features, fp)
+
+
 class Latest(luigi.WrapperTask):
     def requires(self):
         # block, start, stop = get_blocks()
         start, stop = 484743, 493386
-        return MakeNetwork(start_height=start, end_height=stop)
+        yield MakeNetwork(start_height=start, end_height=stop)
+        start_time, stop_time = 1505175181, 1510009531
+        for time in range(start_time, stop_time - HOURS_24, HOURS_24):
+            yield FeaturizeTransactionInterval(start_time=time,
+                                               end_time=time+HOURS_24)
+
 
 def main():
     pass
 if __name__ == '__main__':
     main()
+
