@@ -6,13 +6,10 @@ import networkx as nx
 import luigi
 import itertools
 import pickle
+from settings import DATA_DIR, RES_DIR, TX_TIME_FILE, HOURS_24
 
 
-DATA_DIR = 'data'
-RES_DIR = 'tmp'
-TX_TIME_FILE = 'tx_time.json'  # file which caches the time of each block
 TX_TIME_CACHE = None
-HOURS_24 = 43200 * 2  # seconds in 24 hrs
 
 
 def get_blocks():
@@ -164,10 +161,14 @@ class FeaturizeTransactionInterval(luigi.Task):
             num_in += len(tx.get('inputs', []))
             num_out += len(tx.get('out', []))
             for input_ in tx.get('inputs', []):
-                val = input_.get('value', 0)
+                val = 0
+                try:
+                    val = input_['prev_out']['value']
+                except KeyError:
+                    pass
                 total_val += val
                 try:
-                    age = int(input_['tx_index']) / int(tx['tx_index'])
+                    age = int(input_['prev_out']['tx_index']) / int(tx['tx_index'])
                     for k in old_vals.keys():
                         if age <= float(k):
                             old_vals[k] += val
@@ -185,17 +186,6 @@ class FeaturizeTransactionInterval(luigi.Task):
         }
         with self.output().open('w') as fp:
             json.dump(features, fp)
-
-
-class Latest(luigi.WrapperTask):
-    def requires(self):
-        # block, start, stop = get_blocks()
-        start, stop = 484743, 493386
-        yield MakeNetwork(start_height=start, end_height=stop)
-        start_time, stop_time = 1505175181, 1510009531
-        for time in range(start_time, stop_time - HOURS_24, HOURS_24):
-            yield FeaturizeTransactionInterval(start_time=time,
-                                               end_time=time+HOURS_24)
 
 
 def main():
