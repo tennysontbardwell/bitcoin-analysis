@@ -16,9 +16,10 @@ LOG.addHandler(ch)
 
 DATA_PATH = 'data'
 DATA_FILE = 'data.json'
-TIME_START = 1510000000
+# TIME_START = 1510000000  # Nov 6
+TIME_START = 1512592000  # Dec 1
 TIME_DELTA = 43200
-DELAY = 1
+DELAY = 0.1
 
 getURL = lambda x: 'https://blockchain.info/rawblock/{}'.format(x)
 getTimeURL = lambda t: 'https://blockchain.info/blocks/{}?format=json'.format(t)
@@ -39,7 +40,7 @@ class JsonFile:
 
     def store(self):
         with open(self.file, 'w') as fp:
-            json.dump(self.j, fp)
+            json.dump(self.j, fp, indent=4)
         LOG.info('data file written')
 
 
