@@ -7,6 +7,7 @@ import luigi
 import json
 from os import path
 import os
+from functools import lru_cache
 from settings import DATA_DIR, RES_DIR, HOURS_24, BITSTAMP_PRICE_FILE
 from processing import FeaturizeTransactionInterval
 import pickle
@@ -21,6 +22,7 @@ class Prices:
         with open(path.join(DATA_DIR, BITSTAMP_PRICE_FILE)) as fp:
             self.data = pd.read_csv(fp)
 
+    @lru_cache(maxsize=100000)
     def _convert_to_epoch(self, date_str):
         '''Bitstamp's data is in form YYYY-MM-DD, but each happened on EST at 6pm
 
@@ -32,12 +34,12 @@ class Prices:
                             est.hour, est.minute, est.second))
 
     def get_series(self, epoch_time):
-        last = None
-        for i,series in self.data.iterrows():
-            if self._convert_to_epoch(series['Date']) < epoch_time:
+        '''returns the nearest data point before or equal to epoch_time'''
+        for _,series in self.data.iterrows():
+            if self._convert_to_epoch(series['Date']) <= epoch_time:
+                # print('Request {}, returned {}'.format(
+                #     epoch_time,self._convert_to_epoch(series['Date'])))
                 return series
-            else:
-                last = series
 
 
 class LearnPredictPrice(luigi.Task):
@@ -45,12 +47,60 @@ class LearnPredictPrice(luigi.Task):
     end_time = luigi.IntParameter()
     interval_size = luigi.IntParameter()
     validation_splits = luigi.IntParameter(default=3)
+    # in set {lasso, elasticnet}
+    ml_technique = luigi.Parameter(default='lasso')  # TODO implement
+    # in set {future, current}
+    problem = luigi.Parameter(default='future')  # TODO implement
 
     def get_interval_vec(self, interval):
         with interval.output().open() as fp:
             features = json.load(fp)
-            price_info = self.prices.get_series(interval.start_time)
-            price_info_res = self.prices.get_series(interval.end_time)
+            price_info_res = self.prices.get_series(
+                interval.end_time + self.interval_size)
+            price_info_history = \
+                [self.prices.get_series(interval.end_time - days * self.interval_size)
+                 for days in range(7)]
+        if self.problem == 'future':
+            return (
+                [
+                    features['total_transactions'],
+                    features['total_inputs'],
+                    # features['total_outputs'],
+                    features['amount_traded'],
+                    features['old_amounts_traded']['0.1'] \
+                            / features['amount_traded'],
+                    features['old_amounts_traded']['0.2'] \
+                            / features['amount_traded'],
+                    # features['old_amounts_traded']['0.3'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.4'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.5'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.6'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.7'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.8'] \
+                    #         / features['amount_traded'],
+                    features['old_amounts_traded']['0.9'] \
+                            / features['amount_traded'],
+                    price_info_history[0]['High'],
+                    price_info_history[0]['Low'],
+                    price_info_history[0]['Close'],
+                    price_info_history[1]['Close'],
+                    price_info_history[2]['Close'],
+                    price_info_history[3]['Close'],
+                    price_info_history[4]['Close'],
+                    price_info_history[5]['Close']
+                ],
+                price_info_res['Close'] - price_info_history[0]['Close'],
+                {
+                    'price': price_info_history[0]['Close']
+                }
+            )
+
+        elif self.problem == 'current':
             return (
                 [
                     features['total_transactions'],
@@ -75,18 +125,17 @@ class LearnPredictPrice(luigi.Task):
                             / features['amount_traded'],
                     features['old_amounts_traded']['0.9'] \
                             / features['amount_traded'],
-                    price_info['High'],
-                    price_info['Low'],
-                    price_info['Open'],
-                    price_info['Close']
                 ],
-                price_info['Open'] - price_info_res['Close']
+                price_info_history[0]['Close'] - price_info_history[0]['Open'],
+                {
+                    'price': price_info_history[0]['Close']
+                }
             )
 
     def output(self):
-        dir_name = 'learn_predict_price_from_{}_to_{}_intervals_{}_{}splits'.format(
+        dir_name = 'learn_predict_price_from_{}_to_{}_intervals_{}_{}splits_{}_{}'.format(
                 self.start_time, self.end_time, self.interval_size,
-                self.validation_splits)
+                self.validation_splits, self.ml_technique, self.problem)
         return {
             'training_data': luigi.LocalTarget(
                     path.join(RES_DIR,dir_name,'training_data.json')),
@@ -118,7 +167,7 @@ class LearnPredictPrice(luigi.Task):
         X = []
         Y = []
         for interval in self.requires():
-            x,y = self.get_interval_vec(interval)
+            x,y,z = self.get_interval_vec(interval)
             X.append(x)
             Y.append(y)
 
@@ -129,14 +178,17 @@ class LearnPredictPrice(luigi.Task):
 
         with self.output()['results'].open('w') as fp:
             tscv = model_selection.TimeSeriesSplit(n_splits=self.validation_splits)
-            for i,(train_index, test_index) in enumerate(tscv.split(x)):
+            for i,(train_index, test_index) in enumerate(tscv.split(X)):
 
-                clf = linear_model.Lasso(alpha=0.1)
+                if self.ml_technique == 'lasso':
+                    clf = linear_model.Lasso()
+                elif self.ml_technique == 'elasticnet':
+                    clf = linear_model.ElasticNet()
                 x_train, x_test = X[train_index], X[test_index]
                 y_train, y_test = Y[train_index], Y[test_index]
                 clf.fit(x_train, y_train)
                 test_res = clf.predict(x_test)
-                print(len(y_test))
+                print((len(x_train), len(y_train)))
 
                 fp.write('====== Test {} ======\n'.format(i+1))
                 for a,b in zip(test_res, y_test):
@@ -151,7 +203,7 @@ class LearnPredictPrice(luigi.Task):
                     x_axis_label='Actual Daily Price Delta',
                     y_axis_label='Predicted Daily Price Delta',
                     tools=TOOLS)
-                p.circle(y_test, test_res, radius=20, line_color=None)
+                p.circle(y_test, test_res, line_color=None)
                 show(p)
 
             # names = ['total tx', 'total in', 'total out', 'amount traded',
