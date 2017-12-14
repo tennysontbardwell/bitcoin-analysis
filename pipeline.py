@@ -24,7 +24,7 @@ class Latest(luigi.WrapperTask):
                     'lasso',
                     'elasticnet',
                     # 'svr-linear',
-                    'svr-rbf',
+                    # 'svr-rbf',
                     'ridge'
                 ],
                 ['future', 'current', 'volume']):

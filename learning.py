@@ -15,7 +15,7 @@ import pickle
 from pytz import timezone
 import calendar
 from datetime import datetime
-from bokeh.plotting import figure, output_file, show
+from bokeh.plotting import figure, output_file, save
 
 
 class Prices:
@@ -230,17 +230,20 @@ class LearnPredictPrice(luigi.Task):
                 clf = {
                     'lasso': linear_model.Lasso(),
                     'elasticnet': linear_model.ElasticNet(),
-                    'ridge': linear_model.Ridge(),
-                    'svr-linear': SVR(kernel='linear'),
-                    'svr-rbf': SVR(kernel='rbf')
+                    'ridge': linear_model.Ridge()
+                    # 'lasso': linear_model.LassoLarsCV(),
+                    # 'elasticnet': linear_model.ElasticNetCV(
+                    #     l1_ratio=[.1, .5, .7, .9, .95, .99, 1],
+                    #     max_iter=10**6
+                    # ),
+                    # 'ridge': linear_model.RidgeCV(
+                    #     alphas=[10**x for x in range(-2,3)]),
                 }[self.ml_technique]
 
                 ml_pretty_name = {
                     'lasso': 'Lasso',
                     'elasticnet': 'Elastic Net',
                     'ridge': 'Ridge Regression',
-                    'svr-linear': 'SVR (Linear Kernel)',
-                    'svr-rbf': 'SVR (RBF Kernel)',
                 }[self.ml_technique]
 
                 x_train, x_test = X[train_index], X[test_index]
@@ -248,18 +251,21 @@ class LearnPredictPrice(luigi.Task):
                 clf.fit(x_train, y_train)
                 test_res = clf.predict(x_test)
 
+                fp.write('====== Score {} ======\n'.format(i+1))
+                fp.write('{}\n'.format(clf.score(x_test, y_test)))
+
+                fp.write('====== Importance {} ======\n'.format(i+1))
                 try:
                     if 'coef_' in dir(clf):
                             fp.write(str(clf.coef_))
                     else:
-                        fp.write(str(clf.feature_importances_))
+                        fp.write(str(clf.feature_importances_) + '\n')
                 except AttributeError:
                     pass
 
                 fp.write('====== Test {} ======\n'.format(i+1))
                 for a,b in zip(test_res, y_test):
                     fp.write('Predicted: {:8.2f}   Actual: {:8.2f}\n'.format(a,b))
-                print(self.output()['plots'][i].path)
                 output_file(self.output()['plots'][i].path,
                             mode="cdn")
                 TOOLS="crosshair,pan,wheel_zoom,box_zoom,reset,box_select,lasso_select"
@@ -269,7 +275,7 @@ class LearnPredictPrice(luigi.Task):
                     y_axis_label='Predicted',
                     tools=TOOLS)
                 p.circle(y_test, test_res, line_color=None)
-                show(p)
+                save(p)
 
             # names = ['total tx', 'total in', 'total out', 'amount traded',
             #          '.1', '.2', '.3', '.4', '.5', '.6', '.7', '.8'. '.9',
