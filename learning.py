@@ -64,14 +64,14 @@ class LearnPredictPrice(luigi.Task):
         if self.problem == 'future':
             return (
                 [
-                    features['total_transactions'],
-                    features['total_inputs'],
+                    # features['total_transactions'],
+                    # features['total_inputs'],
                     # features['total_outputs'],
-                    features['amount_traded'],
-                    features['old_amounts_traded']['0.1'] \
-                            / features['amount_traded'],
-                    features['old_amounts_traded']['0.2'] \
-                            / features['amount_traded'],
+                    # features['amount_traded'],
+                    # features['old_amounts_traded']['0.1'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.2'] \
+                    #         / features['amount_traded'],
                     # features['old_amounts_traded']['0.3'] \
                     #         / features['amount_traded'],
                     # features['old_amounts_traded']['0.4'] \
@@ -84,10 +84,10 @@ class LearnPredictPrice(luigi.Task):
                     #         / features['amount_traded'],
                     # features['old_amounts_traded']['0.8'] \
                     #         / features['amount_traded'],
-                    features['old_amounts_traded']['0.9'] \
-                            / features['amount_traded'],
-                    price_info_history[0]['High'],
-                    price_info_history[0]['Low'],
+                    # features['old_amounts_traded']['0.9'] \
+                    #         / features['amount_traded'],
+                    # price_info_history[0]['High'],
+                    # price_info_history[0]['Low'],
                     price_info_history[0]['Close'],
                     price_info_history[1]['Close'],
                     price_info_history[2]['Close'],
@@ -95,7 +95,7 @@ class LearnPredictPrice(luigi.Task):
                     price_info_history[4]['Close'],
                     price_info_history[5]['Close']
                 ],
-                price_info_res['Close'] - price_info_history[0]['Close'],
+                (price_info_res['Close'] - price_info_history[0]['Close']) / price_info_history[0]['Close'],
                 {
                     'price': price_info_history[0]['Close'],
                     'title': 'Predicted Next Day Prices Against Actual, Using {}, Time Slice {}'
@@ -150,29 +150,29 @@ class LearnPredictPrice(luigi.Task):
             return (
                 [
                     features['total_transactions'],
-                    features['total_inputs'],
-                    features['total_outputs'],
+                    # features['total_inputs'],
+                    # features['total_outputs'],
                     features['amount_traded'],
-                    features['old_amounts_traded']['0.1'] \
-                            / features['amount_traded'],
+                    # features['old_amounts_traded']['0.1'] \
+                    #         / features['amount_traded'],
                     features['old_amounts_traded']['0.2'] \
                             / features['amount_traded'],
-                    features['old_amounts_traded']['0.3'] \
-                            / features['amount_traded'],
-                    features['old_amounts_traded']['0.4'] \
-                            / features['amount_traded'],
-                    features['old_amounts_traded']['0.5'] \
-                            / features['amount_traded'],
-                    features['old_amounts_traded']['0.6'] \
-                            / features['amount_traded'],
-                    features['old_amounts_traded']['0.7'] \
-                            / features['amount_traded'],
+                    # features['old_amounts_traded']['0.3'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.4'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.5'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.6'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.7'] \
+                    #         / features['amount_traded'],
                     features['old_amounts_traded']['0.8'] \
                             / features['amount_traded'],
-                    features['old_amounts_traded']['0.9'] \
-                            / features['amount_traded'],
+                    # features['old_amounts_traded']['0.9'] \
+                    #         / features['amount_traded'],
                 ],
-                price_info_history[0]['Close'] - price_info_history[0]['Open'],
+                (price_info_history[0]['Close'] - price_info_history[0]['Open']) / price_info_history[0]['Open'],
                 {
                     'price': price_info_history[0]['Close'],
                     'title': 'Predicted Same Day Prices Against Actual, Using {}, Time Slice {}'
