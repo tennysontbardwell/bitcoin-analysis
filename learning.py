@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from sklearn import linear_model, model_selection
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
 import pandas as pd
 import numpy as np
 import luigi
@@ -96,7 +97,52 @@ class LearnPredictPrice(luigi.Task):
                 ],
                 price_info_res['Close'] - price_info_history[0]['Close'],
                 {
-                    'price': price_info_history[0]['Close']
+                    'price': price_info_history[0]['Close'],
+                    'title': 'Predicted Next Day Prices Against Actual, Using {}, Time Slice {}'
+                }
+            )
+
+        elif self.problem == 'volume':
+            return (
+                [
+                    # features['total_transactions'],
+                    # features['total_inputs'],
+                    # features['total_outputs'],
+                    # features['amount_traded'],
+                    # features['old_amounts_traded']['0.1'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.2'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.3'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.4'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.5'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.6'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.7'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.8'] \
+                    #         / features['amount_traded'],
+                    # features['old_amounts_traded']['0.9'] \
+                    #         / features['amount_traded'],
+                    price_info_res['High'],
+                    price_info_res['Low'],
+                    price_info_res['Close'],
+                    price_info_history[0]['High'],
+                    price_info_history[0]['Low'],
+                    price_info_history[0]['Close'],
+                    price_info_history[1]['Close'],
+                    price_info_history[2]['Close'],
+                    price_info_history[3]['Close'],
+                    price_info_history[4]['Close'],
+                    price_info_history[5]['Close']
+                ],
+                features['amount_traded'],
+                {
+                    'price': price_info_history[0]['Close'],
+                    'title': 'Predicted Same Day Volume Against Actual, Using {}, Time Slice {}'
                 }
             )
 
@@ -128,7 +174,8 @@ class LearnPredictPrice(luigi.Task):
                 ],
                 price_info_history[0]['Close'] - price_info_history[0]['Open'],
                 {
-                    'price': price_info_history[0]['Close']
+                    'price': price_info_history[0]['Close'],
+                    'title': 'Predicted Same Day Prices Against Actual, Using {}, Time Slice {}'
                 }
             )
 
@@ -167,7 +214,7 @@ class LearnPredictPrice(luigi.Task):
         X = []
         Y = []
         for interval in self.requires():
-            x,y,z = self.get_interval_vec(interval)
+            x,y,feature_misc = self.get_interval_vec(interval)
             X.append(x)
             Y.append(y)
 
@@ -180,15 +227,34 @@ class LearnPredictPrice(luigi.Task):
             tscv = model_selection.TimeSeriesSplit(n_splits=self.validation_splits)
             for i,(train_index, test_index) in enumerate(tscv.split(X)):
 
-                if self.ml_technique == 'lasso':
-                    clf = linear_model.Lasso()
-                elif self.ml_technique == 'elasticnet':
-                    clf = linear_model.ElasticNet()
+                clf = {
+                    'lasso': linear_model.Lasso(),
+                    'elasticnet': linear_model.ElasticNet(),
+                    'ridge': linear_model.Ridge(),
+                    'svr-linear': SVR(kernel='linear'),
+                    'svr-rbf': SVR(kernel='rbf')
+                }[self.ml_technique]
+
+                ml_pretty_name = {
+                    'lasso': 'Lasso',
+                    'elasticnet': 'Elastic Net',
+                    'ridge': 'Ridge Regression',
+                    'svr-linear': 'SVR (Linear Kernel)',
+                    'svr-rbf': 'SVR (RBF Kernel)',
+                }[self.ml_technique]
+
                 x_train, x_test = X[train_index], X[test_index]
                 y_train, y_test = Y[train_index], Y[test_index]
                 clf.fit(x_train, y_train)
                 test_res = clf.predict(x_test)
-                print((len(x_train), len(y_train)))
+
+                try:
+                    if 'coef_' in dir(clf):
+                            fp.write(str(clf.coef_))
+                    else:
+                        fp.write(str(clf.feature_importances_))
+                except AttributeError:
+                    pass
 
                 fp.write('====== Test {} ======\n'.format(i+1))
                 for a,b in zip(test_res, y_test):
@@ -198,10 +264,9 @@ class LearnPredictPrice(luigi.Task):
                             mode="cdn")
                 TOOLS="crosshair,pan,wheel_zoom,box_zoom,reset,box_select,lasso_select"
                 p = figure(
-                    title="Predicted vs Actual Time Changes, Time Slice {}"\
-                        .format(i+1),
-                    x_axis_label='Actual Daily Price Delta',
-                    y_axis_label='Predicted Daily Price Delta',
+                    title=feature_misc['title'].format(ml_pretty_name, i+1),
+                    x_axis_label='Actual',
+                    y_axis_label='Predicted',
                     tools=TOOLS)
                 p.circle(y_test, test_res, line_color=None)
                 show(p)

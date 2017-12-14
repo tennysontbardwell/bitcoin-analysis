@@ -84,50 +84,47 @@ class MakeNetwork(luigi.Task):
 
     def output(self):
         return luigi.LocalTarget(path.join(RES_DIR,
-            'network_from_{}_to_{}.pickle'.format(self.start_height, self.end_height)))
+            'network_from_{}_to_{}.txt'.format(self.start_height, self.end_height)))
 
     def _iter_tx(self):
         total_num = self.end_height - self.start_height + 1
         for height in range(self.start_height, self.end_height + 1):
             with open(path.join(DATA_DIR, str(height))) as fp:
-                for tx in json.load(fp)['tx']:
+                data = json.load(fp)
+                for tx in data['tx']:
                     yield tx
 
             current_num = height - self.start_height + 1
-            print('finished block {} ({}/{} blocks or {}%)'.format(
-                    height, current_num, total_num,
-                    int(current_num/total_num * 100)))
+            if current_num % 50 == 0:
+                print('finished block {} ({}/{} blocks or {}%)'.format(
+                        height, current_num, total_num,
+                        int(current_num/total_num * 100)))
 
     def run(self):
-        g = nx.Graph()
-        for tx in self._iter_tx():
-
-            inputs = []
-            try:
-                for input in tx['inputs']:
-                    try:
-                        inputs.append((
-                            input['prev_out']['value'],
-                            input['prev_out']['addr']))
-                    except KeyError:
-                        pass
-
-                outs = []
-                for out in tx['outs']:
-                    try:
-                        outs.append( (out['value'], out['addr']) )
-                    except KeyError:
-                        pass
-                # total = sum( [out[0] for out in outs] )
-
-                for input,out in itertools.product(inputs, outs):
-                    val = input[0] * (out[0] / total)
-                    g.add_edge(input[1], out[1], {'amount': val})
-            except KeyError:
-                pass
-
-        with open(self.output().path, 'wb') as fp:
-            pickle.dump(g, fp)
+        with self.output().open('w') as fp:
+            for tx in self._iter_tx():
+                inputs = []
+                try:
+                    for input in tx['inputs']:
+                        tx_index = tx['tx_index']
+                        try:
+                            fp.write('{},tx_{},{}\n'.format(
+                                input['prev_out']['addr'],
+                                tx_index,
+                                input['prev_out']['value']))
+                        except KeyError:
+                            pass
+                    outs = []
+                    for out in tx['out']:
+                        try:
+                            fp.write('{},tx_{},{}\n'.format(
+                                out['addr'],
+                                tx_index,
+                                out['value']))
+                        except KeyError:
+                            pass
+                except KeyError:
+                    pass
 
 
 class FeaturizeTransactionInterval(luigi.Task):
